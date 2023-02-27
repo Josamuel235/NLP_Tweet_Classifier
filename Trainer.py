@@ -158,7 +158,6 @@ class Trainer:
             
         acc = correct/total
         avg = np.array(epoch_loss).mean()
-        self.test_loss.append(avg)
         print(F"test_loss: {avg}")
         print(F"test accuracy: {acc}")
         
