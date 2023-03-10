@@ -9,7 +9,7 @@ class Data_Creator:
         
 
     def tokenize(self, df):
-        nlp= spacy.load("en_core_web_sm", disable=["parser"])
+        nlp = spacy.load("en_core_web_sm")
         tweet = df['tweet'].apply(lambda x: nlp(x.strip()))
         tokenized = df.assign(tweet = tweet)
         return tokenized
@@ -21,7 +21,7 @@ class Data_Creator:
         "â[^ ]*": ' ',"(dont)|(don't)": 'do not', "(cant)|(can't)": "can not",
         "(yous)|(you's)": "you is", "(yous)|(you's)": "you is", 
         "(youve)|(you've)": "you have", "(doesnt)|(doesn't)": 'does not', 
-        "(wont)|(won't)": 'will not', "[0-9]+\.*[0-9%]+\w*" : "<NUMBER>",'\\n\.':' ' ,'\\n':' ',
+        "(wont)|(won't)": 'will not', "[0-9]+\.*[0-9%]+\w*" : "NUMBER",'\\n\.':' ' ,'\\n':' ',
         "\.{2,}": '.', "!{2,}":'!', "\?{2,}":'?', 'ing[^a-z]':' ', 'ed[^a-z]': ' ', '_':" ",
         ' +': ' '}
 

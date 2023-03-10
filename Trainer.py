@@ -10,10 +10,13 @@ from Dataset import Dataset
 from Data_Creator import Data_Creator
 from Data_Processor import data_processor
 from LSTM_Architecture import NLP_LSTM
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn import svm
+from sklearn.metrics import classification_report
 
 
 class Trainer:
-    def __init__(self, filepath, batch_size, emded_dim, hidden_dim, learning_rate, epochs, gam, train_size, test_size, early, layers, thresh, most, dropout, bi):
+    def __init__(self, filepath, models, batch_size, emded_dim, hidden_dim, learning_rate, epochs, gam, train_size, test_size, early, layers, thresh, most, dropout, bi):
 
         self.gpu_avail = torch.cuda.is_available()
         loaded_Data = Data_Creator(filepath)
@@ -21,15 +24,17 @@ class Trainer:
         processed_data = data_processor(loaded_Data.tokenized_df, self.vocabulary, test_size, train_size, thresh, most)
         
         ## Data
-        train_data = processed_data.train
-        vlad_data = processed_data.validate
-        test_data = processed_data.test
+        self.train_data = processed_data.train
+        self.vlad_data = processed_data.validate
+        self.test_data = processed_data.test
 
         ## Data Loaders
+        self.train_loader = DataLoader(Dataset(self.train_data), batch_size=batch_size, shuffle=True)
+        self.vlad_loader = DataLoader(Dataset(self.vlad_data), batch_size=batch_size, shuffle=True)
+        self.test_loader = DataLoader(Dataset(self.test_data), batch_size=batch_size, shuffle=True)
 
-        self.train_loader = DataLoader(Dataset(train_data), batch_size=batch_size, shuffle=True)
-        self.vlad_loader = DataLoader(Dataset(vlad_data), batch_size=batch_size, shuffle=True)
-        self.test_loader = DataLoader(Dataset(test_data), batch_size=batch_size, shuffle=True)
+        ## Models
+        self.models = models
 
         ## Params
         self.last_epoch = epochs
@@ -39,11 +44,11 @@ class Trainer:
         ## model
         if self.gpu_avail:
             self.loss = nn.BCELoss().cuda()
-            self.model = NLP_LSTM(emded_dim, hidden_dim, len(self.vocabulary.word_idx), layers, dropout, bi).cuda().float()
+            self.model = NLP_LSTM(self.gpu_avail, emded_dim, hidden_dim, len(self.vocabulary.word_idx), layers, dropout, bi).cuda().float()
             self.best = deepcopy(self.model.state_dict())
         else: 
             self.loss = torch.nn.BCELoss()
-            self.model = NLP_LSTM(emded_dim, hidden_dim, len(self.vocabulary.word_idx))
+            self.model = NLP_LSTM(self.gpu_avail, emded_dim, hidden_dim, len(self.vocabulary.word_idx), layers, dropout, bi)
 
         ## Optimizer    
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
@@ -58,11 +63,27 @@ class Trainer:
         self.train_acc = []
         self.vlad_acc = []
 
-
     def run(self):
+        if 'simple' in self.models:
+            simple = self.Simple_gusser_Model()
+            print('The Simple Evaluation Metrics:\n')
+            print(simple)
+            print("\n")
+        if 'svm' in self.models:
+            svm = self.svm_model()
+            print('The SVM Evaluation Metrics:\n')
+            print(svm)
+            print("\n")
+        if 'lstm' in self.models:
+            lstm = self.run_LSTM()
+            print('The LSTM Evaluation Metrics:\n')
+            print(lstm)
+            print("\n")
+
+
+    def run_LSTM(self):
         print("Training Commencing")
         start_time = datetime.now()
-
         for epoch in range(0, self.last_epoch):
             print(F'epoch: {epoch+1}')
             print('Training\n')
@@ -79,14 +100,13 @@ class Trainer:
                 print('Early Stopping\n')
                 break
             count += 1
-
         end_time = datetime.now()
-        print("Training time: " + str(end_time-start_time))
+        print(end_time - start_time)
         self.model.load_state_dict(self.best)
         self.model.train(False)
         self.save_model()
         self.plot_stats()
-        self.test()
+        return self.test()
 
     
     def train(self):
@@ -95,8 +115,9 @@ class Trainer:
         total = 0
         
         for text, tag in self.train_loader:
-            text = text.cuda()
-            tag = tag.cuda()
+            if self.gpu_avail:
+                text = text.cuda()
+                tag = tag.cuda()
             self.optimizer.zero_grad()
             outputs = self.model.forward(text)
             loss = self.loss(outputs, tag)
@@ -123,8 +144,9 @@ class Trainer:
         total = 0
         
         for text, tag in self.vlad_loader:
-            text = text.cuda()
-            tag = tag.cuda()
+            if self.gpu_avail:
+                text = text.cuda()
+                tag = tag.cuda()
             outputs = self.model.forward(text)
             loss = self.loss(outputs, tag)
             epoch_loss.append(loss.item())
@@ -142,16 +164,21 @@ class Trainer:
 
     def test(self):
         epoch_loss = []
+        pred =[]
+        actual = []
         correct = 0 
         total = 0
         
         for text, tag in self.test_loader:
-            text = text.cuda()
-            tag = tag.cuda()
-            outputs = self.model.forward(text)
+            if self.gpu_avail:
+                text = text.cuda()
+                tag = tag.cuda()
+            outputs = self.model.tester(text)
             loss = self.loss(outputs, tag)
             epoch_loss.append(loss.item())
             classification = torch.round(outputs.squeeze())
+            pred.extend(classification.cpu().detach().numpy())
+            actual.extend(tag.squeeze().cpu().detach().numpy())
             num_correct = torch.eq(classification, tag.squeeze()).squeeze()
             correct += torch.sum(num_correct)
             total += (tag.squeeze()).size(0)
@@ -160,6 +187,7 @@ class Trainer:
         avg = np.array(epoch_loss).mean()
         print(F"test_loss: {avg}")
         print(F"test accuracy: {acc}")
+        return classification_report(actual, pred, output_dict=True)
         
     def save_model(self):
         model_path = 'latest_model.pt'
@@ -186,3 +214,55 @@ class Trainer:
         plt.title("LSTM Sentiment" + " Stats Plot")
         plt.savefig("Accuracy_plot.png")
         plt.show()
+
+
+    # SVM model
+    def svm_model(self):
+        vectorizer = TfidfVectorizer(min_df = 5,
+                                 max_df = 0.8,
+                                 stop_words = 'english',
+                                 sublinear_tf = True,
+                                 use_idf = True)
+
+        def convert(x):
+            keep = []
+            for i in x:
+                keep.append(self.vocabulary.idx_word[i])
+            return ' '.join(keep)
+
+        ## Pre-process
+        svm_train = self.train_data['numerized_tweet'].apply(lambda x: convert(x))
+        svm_test = self.test_data['numerized_tweet'].apply(lambda x: convert(x))
+        
+        #TD-IDF
+        X_train = vectorizer.fit_transform(svm_train)
+        X_test = vectorizer.transform(svm_test)
+        
+        # Labels
+        y_train = self.train_data['Toxicity']
+        y_test = self.test_data['Toxicity']
+        
+        
+        #SVM 
+        classifier = svm.LinearSVC(C = 10**-2)
+        
+        
+        #SVM Train
+        classifier.fit(X_train, y_train)
+        
+        #SVM Test
+        predictions = classifier.predict(X_test)
+        
+        return classification_report(y_test, predictions, output_dict=True)
+    
+
+    # Simple model
+    def Simple_gusser_Model(self):
+
+        np.random.choice([1,0], p =[0.45, 0.55])
+        
+        base = []
+        for i in range(len(self.test_data['Toxicity'])):
+            base.append(np.random.choice([1,0], p =[0.45, 0.55]))
+        
+        return classification_report(self.test_data['Toxicity'], base, output_dict=True)

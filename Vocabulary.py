@@ -17,7 +17,7 @@ class vocab_builder:
             if word.norm not in self.tracker:
                 self.tracker[word.norm] = 1
                 self.word_idx[str(word)] = len(self.word_idx)
-                self.idx_word[len(self.idx_word)] = word
+                self.idx_word[len(self.idx_word)] = str(word)
             else:
                 self.tracker[word.norm] += 1
         if self.longest < count:
