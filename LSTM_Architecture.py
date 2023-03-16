@@ -53,8 +53,12 @@ class NLP_LSTM(nn.Module):
         
     def tester(self, inputs):
         
-        hidden = torch.zeros(self.layers*self.bi, inputs.shape[0], self.hdim).cuda()
-        cell = torch.zeros(self.layers*self.bi, inputs.shape[0], self.hdim).cuda()
+        if self.gpu:
+            hidden = torch.zeros(self.layers*self.bi, inputs.shape[0], self.hdim).cuda()
+            cell = torch.zeros(self.layers*self.bi, inputs.shape[0], self.hdim).cuda()
+        else:
+            hidden = torch.zeros(self.layers*self.bi, inputs.shape[0], self.hdim)
+            cell = torch.zeros(self.layers*self.bi, inputs.shape[0], self.hdim)
         
         embeddings = self.embedder(inputs)
         x = self.relu(self.fc0(embeddings))
